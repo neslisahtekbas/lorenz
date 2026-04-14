@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Lorenz System Analysis</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: 'Times New Roman', serif; background-color: #f0f0f0; display: flex; justify-content: center; padding: 20px; }
+        #panel { background: white; border: 1px solid #ccc; box-shadow: 5px 5px 15px rgba(0,0,0,0.1); padding: 15px; width: 850px; border-radius: 4px; }
+        .header-label { font-size: 18px; font-weight: bold; text-align: center; margin-bottom: 10px; color: #333; }
+        #plot { width: 100%; height: 550px; }
+        .controls { background: #fafafa; border: 1px solid #ddd; padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
+        .control-group { display: flex; flex-direction: column; }
+        .control-group label { font-size: 13px; font-weight: bold; margin-bottom: 4px; color: #555; }
+        .btn-group { grid-column: span 2; display: flex; align-items: center; gap: 10px; border-top: 1px solid #eee; padding-top: 10px; }
+        button { padding: 8px 15px; cursor: pointer; border: 1px solid #999; background: #e1e1e1; border-radius: 3px; font-weight: bold; }
+        button:hover { background: #d1d1d1; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        .value-display { font-weight: normal; color: #000; float: right; }
+    </style>
+</head>
+<body>
+
+<div id="panel">
+    <div id="header" class="header-label">ρ = 28.0 | C = 0.0 <br> Time = 0.0</div>
+    <div id="plot"></div>
+    
+    <div class="controls">
+        <div class="btn-group">
+            <button id="playBtn">Play / Pause</button>
+            <button id="resetBtn">Reset</button>
+            <span id="katastrofMsg" style="margin-left: auto; font-weight: bold; font-size: 14px;"></span>
+        </div>
+
+        <div class="control-group">
+            <label>Rayleigh (ρ) <span class="value-display" id="rhoVal">28.0</span></label>
+            <input type="range" id="rho" min="0.5" max="60" step="0.1" value="28">
+        </div>
+
+        <div class="control-group">
+            <label>C <span class="value-display" id="cVal">0.0</span></label>
+            <input type="range" id="c" min="-150" max="150" step="1" value="0">
+        </div>
+
+        <div class="control-group">
+            <label>Time <span class="value-display" id="timeVal">0.0</span></label>
+            <input type="range" id="animTime" min="0.001" max="100" step="0.1" value="0.001">
+        </div>
+
+        <div class="control-group">
+            <label>Trail Length <span class="value-display" id="trailVal">50</span></label>
+            <input type="range" id="trail" min="5" max="100" step="1" value="50">
+        </div>
+    </div>
+</div>
+
+<script>
+    // Matematiksel Sabitler ve Değişkenler
+    const sigma = 10, beta = 8/3;
+    let isPlaying = false;
+    let animationFrame;
+    let fullPath = { x: [], y: [], z: [], t: [] };
+
+    // Runge-Kutta 4 Çözücü (Continuous Diferansiyel Denklem İçin)
+    function rk4Step(x, y, z, rho, c, dt) {
+        const f = (x, y, z) => [
+            sigma * (y - x),
+            x * (rho - z) - y + c,
+            x * y - beta * z
+        ];
+        let k1 = f(x, y, z);
+        let k2 = f(x + k1[0]*dt/2, y + k1[1]*dt/2, z + k1[2]*dt/2);
+        let k3 = f(x + k2[0]*dt/2, y + k2[1]*dt/2, z + k2[2]*dt/2);
+        let k4 = f(x + k3[0]*dt, y + k3[1]*dt, z + k3[2]*dt);
+        return [
+            x + (dt/6)*(k1[0] + 2*k2[0] + 2*k3[0] + k4[0]),
+            y + (dt/6)*(k1[1] + 2*k2[1] + 2*k3[1] + k4[1]),
+            z + (dt/6)*(k1[2] + 2*k2[2] + 2*k3[2] + k4[2])
+        ];
+    }
+
+    // Tüm Yörüngeyi Önceden Hesapla (Performans İçin)
+    function generatePath() {
+        const rho = parseFloat(document.getElementById('rho').value);
+        const c = parseFloat(document.getElementById('c').value);
+        let x = 1, y = 1, z = 1, dt = 0.01;
+        fullPath = { x: [], y: [], z: [], t: [] };
+        
+        for (let t = 0; t <= 100; t += dt) {
+            fullPath.x.push(x);
+            fullPath.y.push(y);
+            fullPath.z.push(z);
+            fullPath.t.push(t);
+            [x, y, z] = rk4Step(x, y, z, rho, c, dt);
+        }
+    }
+
+    // Grafik Güncelleme Fonksiyonu
+    function updatePlot() {
+        const tNow = parseFloat(document.getElementById('animTime').value);
+        const trail = parseFloat(document.getElementById('trail').value);
+        const rho = parseFloat(document.getElementById('rho').value);
+        const c = parseFloat(document.getElementById('c').value);
+
+        // Kuyruk Sınırlama (Mathematica'daki Max[0, animasyonZamani - trailLength] mantığı)
+        let startIndex = fullPath.t.findIndex(t => t >= tNow - trail);
+        let endIndex = fullPath.t.findIndex(t => t >= tNow);
+        if(startIndex === -1) startIndex = 0;
+        if(endIndex === -1) endIndex = fullPath.t.length - 1;
+
+        const trace = {
+            x: fullPath.x.slice(startIndex, endIndex),
+            y: fullPath.y.slice(startIndex, endIndex),
+            z: fullPath.z.slice(startIndex, endIndex),
+            mode: 'lines',
+            line: { width: 3, color: 'blue', opacity: 0.8 },
+            type: 'scatter3d'
+        };
+
+        const layout = {
+            uirevision: 'false', // Kullanıcının kamera açısını bozmaz
+            margin: { l: 0, r: 0, b: 0, t: 0 },
+            scene: {
+                xaxis: { range: [-50, 50], title: 'X' },
+                yaxis: { range: [-50, 50], title: 'Y' },
+                zaxis: { range: [0, 60], title: 'Z' },
+                aspectmode: 'cube'
+            }
+        };
+
+        Plotly.react('plot', [trace], layout);
+        
+        // Etiketleri Güncelle (Mathematica Formatı)
+        document.getElementById('header').innerHTML = `ρ = ${rho} | C = ${c} <br> Time = ${tNow.toFixed(1)}`;
+        document.getElementById('rhoVal').innerText = rho.toFixed(1);
+        document.getElementById('cVal').innerText = c.toFixed(1);
+        document.getElementById('timeVal').innerText = tNow.toFixed(1);
+        document.getElementById('trailVal').innerText = trail;
+
+        // Katastrof Uyarı Yazısı (Senin Meşhur Formülün)
+        let limit = Math.sqrt((4 * beta * Math.pow(rho - 1, 3)) / 27);
+        let msg = document.getElementById('katastrofMsg');
+        if (Math.abs(c) > limit && rho > 1) {
+            msg.innerText = "Catastrophe: Symmetry is broken!";
+            msg.style.color = "red";
+        } else {
+            msg.innerText = "ATTRACTOR";
+            msg.style.color = "green";
+        }
+    }
+
+    // Animasyon Döngüsü
+    function step() {
+        if (!isPlaying) return;
+        let slider = document.getElementById('animTime');
+        let val = parseFloat(slider.value);
+        if (val < 100) {
+            slider.value = (val + 0.3).toString();
+            updatePlot();
+            animationFrame = requestAnimationFrame(step);
+        } else {
+            isPlaying = false;
+        }
+    }
+
+    // Kontrol Olayları
+    document.getElementById('playBtn').onclick = () => {
+        isPlaying = !isPlaying;
+        if (isPlaying) step();
+    };
+
+    document.getElementById('resetBtn').onclick = () => {
+        document.getElementById('animTime').value = 0.001;
+        isPlaying = false;
+        cancelAnimationFrame(animationFrame);
+        updatePlot();
+    };
+
+    document.querySelectorAll('input').forEach(input => {
+        input.oninput = () => {
+            if (input.id === 'rho' || input.id === 'c') generatePath();
+            updatePlot();
+        };
+    });
+
+    // Başlangıç Kurulumu
+    generatePath();
+    updatePlot();
+</script>
+</body>
+</html>
